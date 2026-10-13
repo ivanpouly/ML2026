@@ -15,6 +15,7 @@ def compute_loss(y, tx, w):
     e = y - tx @ w
     return (e @ e) / (2 * len(y))
 
+print("test")
 
 def compute_gradient(y, tx, w):
     """Computes the gradient at w.
