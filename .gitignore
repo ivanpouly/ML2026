@@ -223,3 +223,6 @@ data/*
 
 # PyCharm
 .idea/
+
+# VS Code
+.vscode/
