@@ -216,3 +216,10 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Données : jamais sur Git
+data/*
+!data/.gitkeep
+
+# PyCharm
+.idea/
