@@ -3,7 +3,6 @@ import numpy as np
 
 def _num(na=(), zero=(), valid=None, log=False):
     """Description of a numeric or ordinal variable.
-
     Args:
         na: codes meaning don't know / refused / missing -> NaN
         zero: codes meaning "none" -> 0
@@ -23,12 +22,11 @@ def _num(na=(), zero=(), valid=None, log=False):
 
 def _cat(na=()):
     """Description of a categorical variable.
-
-        Args:
-            na: codes meaning don't know / refused / missing -> NaN
-        Returns:
-            dict with the above information
-        """
+    Args:
+        na: codes meaning don't know / refused / missing -> NaN
+    Returns:
+        dict with the above information
+    """
     return {"kind": "cat", "na": tuple(na), "zero": (), "valid": None, "log": False}
 
 
