@@ -1,74 +1,205 @@
-import os
-
 import numpy as np
 
-
-def read_column_names(data_dir):
-    """Return the column names of x_train."""
-    with open(os.path.join(data_dir, "x_train.csv")) as f:
-        return f.readline().strip().split(",")[1:]  # [1:] removes "Id"
+from specifications import SPECS
 
 
-def preprocess_column(col, invalid_codes):
-    """Given a column, set Nan and the list of invalid codes to the median of the column
-    and standardize the column.
-
+def load_column_names(csv_path):
+    """Return the column names from x_train.csv, without the Id column.
     Args:
-        col: shape=(N,). The column to fit.
-        invalid_codes: list of values that are considered invalid.
+        csv_path (str): path to the CSV file
     Returns:
-        dict: A dictionary containing the median, mean,
-        and standard deviation of the column.
+        list of str: column names, in the same order as the CSV file
+    """
+    with open(csv_path) as f:
+        return f.readline().strip().split(",")[1:]
+
+
+def _special_columns(x, idx):
+    """We derive two features from three special features
+    Args:
+        x: shape=(N, D). The design matrix.
+        idx: dict {column name: index in x}.
+    Returns:
+        dict {derived column name: array of shape (N,)}.
+    """
+    disp = x[:, idx["DISPCODE"]]          # 1100 = completed, 1200 = partial complete
+    land = x[:, idx["NUMADULT"]]          # landline: 1-5, 6 or more coded 6-99
+    cell = x[:, idx["HHADULT"]].copy()    # cell phone: 1-76, 77 / 99 = DK / refused
+
+    cell[np.isin(cell, (77, 99))] = np.nan
+
+    return {
+        "IS_PARTIAL": (disp == 1200).astype(float),
+        "HH_ADULTS": np.minimum(np.where(np.isnan(land), cell, land), 6),
+    }
+
+
+def _recode(col, spec):
+    """Take a column, recode its value according to its specification, and return a new array.
+    Args:
+        col: shape=(N,). The column to recode.
+        spec: dict. The variable specification (from SPECS).
+    Returns:
+        shape=(N,). The recoded column.
     """
     col = col.copy()
-    col[np.isin(col, invalid_codes)] = np.nan
-    med = np.nanmedian(col)
-    filled = np.where(np.isnan(col), med, col)
-    std = filled.std()
-    return {"med": med,
-            "mean": filled.mean(), "std": std if std > 0 else 1.0}
-
-def transform_column(col, p):
-    """Apply train stats p to any column (train, val or test).
-    Returns (standardized column, missing indicator)."""
-    col = col.astype(float).copy()
-    col[np.isin(col, p["invalid"])] = np.nan
-    missing = np.isnan(col).astype(float)
-    col[np.isnan(col)] = p["med"]
-    return (col - p["mean"]) / p["std"], missing
-
-DROP = {"FMONTH", "IDATE", "IMONTH", "IDAY", "IYEAR", "SEQNO", "_PSU",
-        "CTELENUM", "PVTRESD1", "COLGHOUS", "STATERES", "CELLFON3", "LADULT", "NUMADULT",
-        "NUMWOMEN", "CTELNUM1", "CELLFON2", "CADULT", "PVTRESD2", "CCLGHOUS", "CSTATE",
-        "LANDLINE", "HHADULT"
+    if spec["na"]:
+        col[np.isin(col, spec["na"])] = np.nan
+    if spec["zero"]:
+        col[np.isin(col, spec["zero"])] = 0.0
+    if spec["valid"]:
+        low, high = spec["valid"]
+        col[(col < low) | (col > high)] = np.nan
+    if spec["log"]:
+        col = np.log1p(col)
+    return col
 
 
-
-
-        "HAREHAB1"}  # à compléter
-# _STATE = a number that represents the state of the US where the observation was made.
-# DISPCODE = 1100 if complete interview, 1200 if partial complete interview
-
-def preprocess_data(x_train, y_train, x_test, train_ids, test_ids):
+def _recoded_columns(x, names, specs):
+    """Given a design matrix, and a subset of its column names, return a dict of recoded columns.
+    Args:
+        x: shape=(N, D). The design matrix.
+        names: list of D column names.
+        specs: dict {column name: variable specification}.
+    Returns:
+        dict {column name: recoded column of shape (N,)}.
     """
-    Preprocess the data by normalizing the features and converting labels to one-hot encoding.
+    if x.shape[1] != len(names):
+        raise ValueError(
+            f"x has {x.shape[1]} columns but {len(names)} names were given. "
+            "Did you keep or remove the Id column in only one of them?"
+        )
+    idx = {name: i for i, name in enumerate(names)}
+    special = _special_columns(x, idx)
+    cols = {}
+    for name, spec in specs.items():
+        if name in special:
+            cols[name] = _recode(special[name], spec)
+        elif name in idx:
+            cols[name] = _recode(x[:, idx[name]], spec)
+    return cols
+
+
+def _feature_names(plan):
+    """Given a list of features, return the list of additional feature names needed, e.g.
+    if the feature is categorical, or if a missing indicator is added.
+    Args:
+        plan: list of dicts. Each dict describes a feature to keep, with keys:
+            name: str. The column name.
+            kind: str. "num" or "cat".
+            add_missing: bool. Whether to add a missing indicator.
+            levels: list of float. The levels of a categorical variable (without the reference).
+            fill: float. The value to impute for a numeric variable.
+    Returns:
+        list of str. The names of the needed features.
+    """
+    names = []
+    for step in plan:
+        if step["kind"] == "num":
+            names.append(step["name"])
+        else:
+            names += [f"{step['name']}={v:g}" for v in step["levels"]]
+        if step["add_missing"]:
+            names.append(f"{step['name']}_missing")
+    return names
+
+
+def _encode(cols, plan, n_rows):
+    """Build a design matrix from a list of features, given the recoded columns and
+    the plan of which features to add and how to encode them.
+    Args:
+        cols: dict {column name: recoded column of shape (N,)}.
+        plan: list of dicts. Each dict describes a feature to keep, with keys:
+            name: str. The column name.
+            kind: str. "num" or "cat".
+            add_missing: bool. Whether to add a missing indicator.
+            levels: list of float. The levels of a categorical variable (without the reference).
+            fill: float. The value to impute for a numeric variable.
+        n_rows: int. The number of rows in the design matrix.
+    Returns:
+        X: shape=(N, F). The design matrix.
+        names: list of str. The names of the features in the design matrix.
+    """
+    names = _feature_names(plan)
+    X = np.empty((n_rows, len(names)))
+    j = 0
+    for step in plan:
+        col = cols[step["name"]]
+        miss = np.isnan(col)
+        if step["kind"] == "num":
+            X[:, j] = np.where(miss, step["fill"], col)
+            j += 1
+        else:
+            # Missing rows and unseen levels get 0 everywhere = reference level
+            for level in step["levels"]:
+                X[:, j] = col == level
+                j += 1
+        if step["add_missing"]:
+            X[:, j] = miss
+            j += 1
+    return X, names
+
+
+# =============================================================================
+# Public API
+# =============================================================================
+
+
+def fit_transform(x, names, specs=SPECS, max_missing=0.95, min_missing=0.005):
+    """Given a design matrix, return a new design matrix with recoded and standardized features.
+    Args:
+        x: shape=(N, D). The design matrix.
+        names: list of D column names.
+        specs: dict {column name: variable specification}.
+        max_missing: float. If a feature has more than this fraction of missing values, it is dropped.
+        min_missing: float. If a feature has more than this fraction of missing values, a missing indicator is added.
+    Returns:
+        X: shape=(N, F). The new design matrix.
+        features: list of F feature names.
+        prep: dict. The preprocessing information needed to apply the same transformation to new data.
+    """
+    cols = _recoded_columns(x, names, specs)
+    plan = []
+    for name, col in cols.items():
+        miss = np.isnan(col)
+        rate = miss.mean()
+        if rate > max_missing:
+            continue
+        step = {"name": name, "kind": specs[name]["kind"],
+                "add_missing": bool(rate >= min_missing), "missing_rate": float(rate)}
+        if step["kind"] == "num":
+            step["fill"] = float(np.nanmedian(col))
+        else:
+            levels, counts = np.unique(col[~miss], return_counts=True)
+            reference = levels[np.argmax(counts)]
+            step["reference"] = float(reference)
+            step["levels"] = [float(v) for v in levels if v != reference]
+        plan.append(step)
+
+    X, features = _encode(cols, plan, x.shape[0])
+    mean, std = X.mean(axis=0), X.std(axis=0)
+    std[std == 0] = 1.0  # constant column: becomes 0 instead of 0/0 = NaN
+    X -= mean
+    X /= std
+
+    prep = {"names": names, "specs": specs, "plan": plan,
+            "mean": mean, "std": std, "features": features}
+    return X, features, prep
+
+
+def transform(x, prep):
+    """Apply a fitted preprocessing (from fit_transform) to new data.
 
     Args:
-        x_train (numpy.ndarray): Training features.
-        y_train (numpy.ndarray): Training labels.
-        x_test (numpy.ndarray): Test features.
-        train_ids (numpy.ndarray): Training sample IDs.
-        test_ids (numpy.ndarray): Test sample IDs.
+        x: shape=(M, D). Raw features with the same columns as the training set.
+        prep: dict returned by fit_transform.
 
     Returns:
-        tuple: Preprocessed training features, one-hot encoded training labels, training sample IDs, and test sample IDs.
+        X: shape=(M, F). Features encoded and standardized with TRAINING stats.
+        features: list of F feature names.
     """
-    y_train = (y_train + 1) / 2
-
-    cols = read_column_names(DATA_DIR)
-    keep = np.array([c not in DROP for c in cols])  # True = colonne gardée
-
-    x_train = x_train[:, keep]
-    x_test = x_test[:, keep]
-    cols = [c for c, k in zip(cols, keep) if k]  # garder les noms alignés avec les colonnes
-    return x_train, y_train_one_hot, train_ids, test_ids
+    cols = _recoded_columns(x, prep["names"], prep["specs"])
+    X, features = _encode(cols, prep["plan"], x.shape[0])
+    X -= prep["mean"]
+    X /= prep["std"]
+    return X, features

@@ -31,3 +31,8 @@ tx_test, _ = transform(x_test, prep)
 tx_train = add_intercept(tx_train)
 tx_test = add_intercept(tx_test)
 features = ["intercept"] + features
+
+print("tx_train:", tx_train.shape, "| tx_test:", tx_test.shape)
+print("NaN:", np.isnan(tx_train).sum(), np.isnan(tx_test).sum())
+print("intercept OK:", np.all(tx_train[:, 0] == 1))
+print("positive rate:", y01_train.mean())
