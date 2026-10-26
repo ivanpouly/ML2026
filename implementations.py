@@ -93,7 +93,7 @@ def least_squares(y, tx):
     try:
         w = np.linalg.solve(A, b)
     except np.linalg.LinAlgError:
-        # Matrice singulière : solution de norme minimale des équations normales
+        # if A is singular, np.linalg.solve doesn't work and raise np.linalg.LinAlgError, then we use the pseudo-inverse
         w = np.linalg.pinv(A) @ b
     return w, compute_mse(y, tx, w)
 
