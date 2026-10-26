@@ -13,8 +13,7 @@ def compute_mse(y, tx, w):
         loss: scalar. The loss corresponding to the input parameters w.
     """
     e = y - tx @ w
-    N = len(y)
-    return (e @ e) / (2 * N)
+    return (1/2) * np.mean(e**2)
 
 
 def compute_gradient_mse(y, tx, w):
@@ -28,9 +27,9 @@ def compute_gradient_mse(y, tx, w):
     Returns:
         gradient: shape (D,). The gradient of the loss at w.
     """
-    e = tx @ w - y
+    e = y - tx @ w
     N = len(y)
-    return tx.T @ e / N
+    return - tx.T @ e / N
 
 
 def mean_squared_error_gd(y, tx, initial_w, max_iters, gamma):
@@ -89,7 +88,13 @@ def least_squares(y, tx):
         w: shape=(D,). The weight vector that minimizes the MSE.
         loss: scalar. The loss value at w.
     """
-    w = np.linalg.solve(tx.T @ tx, tx.T @ y)
+    A = tx.T @ tx
+    b = tx.T @ y
+    try:
+        w = np.linalg.solve(A, b)
+    except np.linalg.LinAlgError:
+        # Matrice singulière : solution de norme minimale des équations normales
+        w = np.linalg.pinv(A) @ b
     return w, compute_mse(y, tx, w)
 
 
