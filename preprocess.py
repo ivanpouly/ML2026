@@ -31,7 +31,7 @@ def _special_columns(x, idx):
     return {
         "IS_PARTIAL": (disp == 1200).astype(float),
         "HH_ADULTS": np.minimum(np.where(np.isnan(land), cell, land), 6),
-        "HAREHAB1_PRESENT": (~np.isnan(x[:, idx["HAREHAB1"]])).astype(float),gi
+        "HAREHAB1_PRESENT": (~np.isnan(x[:, idx["HAREHAB1"]])).astype(float),
     }
 
 
