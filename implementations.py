@@ -13,7 +13,7 @@ def compute_mse(y, tx, w):
         loss: scalar. The loss corresponding to the input parameters w.
     """
     e = y - tx @ w
-    return (1/2) * np.mean(e**2)
+    return (1 / 2) * np.mean(e**2)
 
 
 def compute_gradient_mse(y, tx, w):
@@ -29,7 +29,7 @@ def compute_gradient_mse(y, tx, w):
     """
     e = y - tx @ w
     N = len(y)
-    return - tx.T @ e / N
+    return -tx.T @ e / N
 
 
 def mean_squared_error_gd(y, tx, initial_w, max_iters, gamma):

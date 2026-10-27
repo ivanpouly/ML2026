@@ -22,9 +22,9 @@ def _special_columns(x, idx):
     Returns:
         dict {derived column name: array of shape (N,)}.
     """
-    disp = x[:, idx["DISPCODE"]]          # 1100 = completed, 1200 = partial complete
-    land = x[:, idx["NUMADULT"]]          # landline: 1-5, 6 or more coded 6-99
-    cell = x[:, idx["HHADULT"]].copy()    # cell phone: 1-76, 77 / 99 = DK / refused
+    disp = x[:, idx["DISPCODE"]]  # 1100 = completed, 1200 = partial complete
+    land = x[:, idx["NUMADULT"]]  # landline: 1-5, 6 or more coded 6-99
+    cell = x[:, idx["HHADULT"]].copy()  # cell phone: 1-76, 77 / 99 = DK / refused
 
     cell[np.isin(cell, (77, 99))] = np.nan
 
@@ -154,7 +154,11 @@ def fit_transform(x, names, specs=SPECS, max_missing=0.95, min_missing=0.005):
         rate = miss.mean()
         if rate > max_missing:
             continue
-        step = {"name": name, "kind": specs[name]["kind"], "add_missing": rate > min_missing}
+        step = {
+            "name": name,
+            "kind": specs[name]["kind"],
+            "add_missing": rate > min_missing,
+        }
         if step["kind"] == "num":
             step["fill"] = np.nanmedian(col)
         else:
@@ -170,8 +174,14 @@ def fit_transform(x, names, specs=SPECS, max_missing=0.95, min_missing=0.005):
     X -= mean
     X /= std
 
-    prep = {"names": names, "specs": specs, "plan": plan,
-            "mean": mean, "std": std, "features": features}
+    prep = {
+        "names": names,
+        "specs": specs,
+        "plan": plan,
+        "mean": mean,
+        "std": std,
+        "features": features,
+    }
     return X, features, prep
 
 
