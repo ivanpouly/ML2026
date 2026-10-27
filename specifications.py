@@ -49,6 +49,7 @@ SPECS = {
     "PREGNANT": _cat(na=(7, 9)),
     "HH_ADULTS": _num(),  # derived, see _special_columns
     "IS_PARTIAL": _cat(),  # derived, see _special_columns
+    "HAREHAB1_PRESENT": _num(),  # derived, only asked after a heart attack (target leak)gi
     # --- Body measurements ---------------------------------------------------
     # The course file already applies the implied decimals for these (HTM4 in
     # meters, WTKG3 in kg, _BMI5 as BMI), unlike the raw CDC file.
