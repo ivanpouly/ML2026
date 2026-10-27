@@ -1,0 +1,115 @@
+\documentclass[10pt,conference,compsocconf]{IEEEtran}
+
+\usepackage{hyperref}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{amsmath}
+\hypersetup{hidelinks}
+
+\begin{document}
+\title{Predicting Coronary Heart Disease from BRFSS Survey Answers with Regularized Logistic Regression}
+
+\author{
+  Author One, Author Two, Author Three\\
+  \textit{CS-433 Machine Learning, EPFL, Switzerland}
+}
+
+\maketitle
+
+\begin{abstract}
+We predict whether a respondent of the 2015 Behavioral Risk Factor Surveillance System (BRFSS) reports coronary heart disease or a heart attack (MICHD) from 321 survey answers. After cleaning and encoding 76 variables into 245 features and adding their interactions with age, an L2-regularized logistic regression trained with Newton's method and an F1-tuned decision threshold reaches $F_1 = 0.438 \pm 0.005$ in 5-fold cross-validation and 0.448 on the AIcrowd test set. A paired ablation study attributes the gains to three changes: the logistic loss instead of the squared loss ($+0.009$ over ridge regression), interactions with age ($+0.002$), and a questionnaire skip pattern that reveals the label of 2.7\% of the positives ($+0.008$). Missing-value handling and further features each change $F_1$ by $0.001$ or less.
+\end{abstract}
+
+\section{Introduction}
+The training set contains 328{,}135 respondents described by 321 features (the raw BRFSS columns~\cite{brfss2015}) and a binary label; the test set contains 109{,}379 respondents. Only 8.8\% of the training respondents are positive. Submissions are ranked by the $F_1$ score of the positive class, $F_1 = 2\mathrm{TP}/(2\mathrm{TP}+\mathrm{FP}+\mathrm{FN})$. Accuracy is a poor guide here: predicting ``healthy'' for everyone is 91.2\% accurate but has $F_1 = 0$.
+
+\section{Evaluation protocol}
+All scores are 5-fold cross-validation (CV) results on one fixed random split (seed 1). Every model is evaluated on the same folds, so we report scores as mean $\pm$ standard deviation over folds, and differences between two models as paired mean $\pm$ standard error over folds, which is several times more precise. Preprocessing statistics (medians, levels, means, standard deviations) are fitted on the training folds only. Each model outputs a score, and the decision threshold maximizing $F_1$ is chosen on training data, never on the evaluated fold.
+
+\section{Data preprocessing}
+\textbf{Variable selection.} Using the CDC codebook and calculated-variable documentation~\cite{brfss2015,brfsscv2015}, we keep 73 raw variables. We remove record identifiers and interview logistics (e.g.\ \texttt{SEQNO}, \texttt{FMONTH}), phone-screening questions that are constant among respondents, survey weights, raw answers duplicated by a cleaner CDC calculated variable (e.g.\ \texttt{WTKG3} replaces \texttt{WEIGHT2}, which mixes pounds and kilograms), and the 109 optional-module questions, which are only asked in some states.
+
+\textbf{Recoding.} Depending on the variable, ``don't know'' and ``refused'' codes (7/9, 77/99, \ldots) become missing, ``none'' (88) becomes 0, out-of-range sentinels (e.g.\ 900 and 99{,}900 in the alcohol variables) become missing, and heavy-tailed quantities (alcohol, fruit and vegetable intake, minutes of physical activity) are transformed with $\log(1+x)$.
+
+\textbf{Derived variables.} \texttt{IS\_PARTIAL} flags interviews stopped before the end (15\% of rows); \texttt{HH\_ADULTS} merges the landline and cell-phone versions of the number of adults in the household; \texttt{HAREHAB1\_PRESENT} is discussed in Section~\ref{sec:leak}.
+
+\textbf{Encoding.} The 21 numeric or ordinal variables are imputed with the training median. The 55 categorical variables are one-hot encoded without their most frequent level, which serves as reference and avoids collinearity with the intercept. A missing-value indicator is added for every variable with at least 0.5\% missing values (57 indicators). All columns are standardized: 245 features (244 without \texttt{HAREHAB1\_PRESENT}).
+
+\textbf{Age interactions.} A risk factor does not weigh the same at 30 and at 70. We add the product of the standardized age with every other feature, standardized again, so that each weight can vary linearly with age: 489 features plus an intercept.
+
+\section{Models}
+\textbf{Baselines.} The six required methods are implemented in \texttt{implementations.py}. As baselines we use the constant classifier and ridge regression (normal equations, $\lambda = 3\cdot10^{-3}$ chosen by CV), whose outputs are thresholded like probabilities.
+
+\textbf{Final model.} We minimize
+\begin{equation}
+\frac{1}{N}\sum_{n=1}^{N}\Big[\log\big(1+e^{x_n^\top w}\big)-y_n x_n^\top w\Big] + \frac{\lambda}{2}\lVert w_{1:}\rVert^2,
+\end{equation}
+leaving the intercept $w_0$ unpenalized, with Newton's method: $w \leftarrow w - H^{-1}\nabla$, where $H = X^\top S X / N + \lambda I'$ and $S = \mathrm{diag}\big(p_n(1-p_n)\big)$. It needs no step size and converges in about ten iterations (stopping when $\max|\Delta w| < 10^{-6}$), whereas gradient descent (\texttt{reg\_logistic\_regression}) needs a tuned step size and many iterations on 490 columns. The sigmoid is evaluated as $\tfrac12\big(1+\tanh(t/2)\big)$ to avoid overflow. We select $\lambda \in \{10^{-2}, 10^{-3}, 10^{-4}\}$ by CV ($\lambda = 10^{-2}$) and the threshold $t = 0.196$ that maximizes $F_1$ on the out-of-fold probabilities (Fig.~\ref{fig:threshold}).
+
+\textbf{Alternatives.} We also tried squares and pairwise products of the numeric variables, sex~$\times$~feature interactions, a one-hot \texttt{GENHLTH}, and presence indicators of the module questions (Table~\ref{tab:ablation}).
+
+\section{A target leak in the questionnaire}\label{sec:leak}
+\texttt{HAREHAB1} (``did you go to cardiac rehabilitation after your heart attack?'') belongs to an optional module and is only asked to respondents who reported a heart attack. All 773 respondents who answered it are positive (2.7\% of the positives): its presence reveals the label through the questionnaire's skip logic. The column is part of the provided test features, so the final model uses its presence indicator, and Table~\ref{tab:main} reports scores with and without it.
+
+\section{Results}
+Table~\ref{tab:main} gives the cumulative effect of each modification and Table~\ref{tab:ablation} the paired effect of each change we tested. For speed, the ablations fit the label-free preprocessing once on all training rows; this reproduces the per-fold CV score of the reference model exactly (0.4289). Over 25 combinations of the two missing-value thresholds (drop a variable above 40--95\% missing; add an indicator above 0, 0.5, 5 or 20\% missing, or never), the logistic model without age interactions stays between 0.425 and 0.428. Squares and products of the numeric variables did not help either ($0.426$ vs.\ $0.427$).
+
+\begin{table}[t]
+\centering
+\caption{5-fold CV $F_1$ (mean $\pm$ std over folds). Each indented row adds one change to the row above.}
+\label{tab:main}
+\begin{tabular}{lc}
+\toprule
+Model & CV $F_1$ \\
+\midrule
+Constant ``healthy'' (accuracy 0.912) & 0 \\
+Ridge regression, 244 features & $0.418 \pm 0.005$ \\
+Logistic regression (Newton), $\lambda=10^{-3}$ & $0.427 \pm 0.004$ \\
+\quad + age interactions, $\lambda=10^{-4}$ & $0.429 \pm 0.005$ \\
+\quad + \texttt{HAREHAB1} presence, $\lambda=10^{-2}$ & $\mathbf{0.438 \pm 0.005}$ \\
+\midrule
+Final model, AIcrowd test set & 0.448 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[t]
+\centering
+\caption{Paired effect on CV $F_1$ (mean $\pm$ standard error over the 5 folds).}
+\label{tab:ablation}
+\begin{tabular}{lc}
+\toprule
+Change & $\Delta F_1$ \\
+\midrule
+\multicolumn{2}{l}{\emph{vs.\ logistic + age interactions, without the leak}} \\
+No missing-value indicator & $-0.0007 \pm 0.0002$ \\
+All indicators, drop variables ${>}65\%$ missing & $-0.0009 \pm 0.0003$ \\
+\texttt{HAREHAB1} presence indicator & $+0.0083 \pm 0.0005$ \\
+\midrule
+\multicolumn{2}{l}{\emph{vs.\ final model}} \\
+\texttt{GENHLTH} one-hot instead of ordinal & $-0.0002 \pm 0.0004$ \\
++ 100 module-presence indicators & $+0.0004 \pm 0.0003$ \\
++ sex $\times$ feature interactions & $+0.0005 \pm 0.0006$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\columnwidth]{threshold}
+\caption{Out-of-fold recall, precision and $F_1$ of the final model against the decision threshold. $F_1$ peaks at $t = 0.196$, far below 0.5.}
+\label{fig:threshold}
+\end{figure}
+
+\section{Discussion}
+Three findings stand out. First, the loss matters more than the features: ridge regression fits the 0/1 labels with a squared loss and is clearly beaten by the logistic loss ($+0.009$), which models probabilities directly. Second, apart from the leak, every step beyond the basic cleaning changed $F_1$ by $0.002$ or less: once the variables are correctly recoded and encoded, extra features bring little to a linear model. Third, the F1-optimal threshold is low (Fig.~\ref{fig:threshold}). The final model flags 13.4\% of the respondents and finds 55\% of the positives with a precision of 36\%; its out-of-fold accuracy (0.875) is below that of the constant classifier, which is the price of detecting positives.
+
+The test score (0.448) is 0.010 above CV. With about 9{,}600 positives expected in the test set, the sampling standard deviation of $F_1$ is around 0.004, so part of this gap is chance; we select models on CV only. Without the leak, which carries no clinical information, our CV score is 0.429.
+
+\section{Summary}
+A carefully cleaned, one-hot encoded and standardized feature set, interactions with age and an L2-regularized logistic regression solved by Newton's method give $F_1 = 0.438$ in CV and 0.448 on the test set. \texttt{run.py} reproduces the submission in a few minutes; \texttt{model\_search.py} repeats the selection of $\lambda$ and of the threshold, and \texttt{ablations.py} reproduces Tables~\ref{tab:main} and~\ref{tab:ablation}.
+
+\bibliographystyle{IEEEtran}
+\bibliography{literature}
+
+\end{document}
