@@ -12,7 +12,7 @@ described in the report (`HAREHAB1`).
 | | F1 |
 |---|---|
 | 5-fold cross-validation | 0.429 ± 0.005 |
-| AIcrowd test set (submission produced by `run.py`) | 0.437 |
+| AIcrowd test set (submission produced by `run.py`) | 0.4?? (to fill in after submitting) |
 
 The report (2 pages) is in `report/report.pdf`, with its LaTeX source in `report/`.
 
@@ -97,9 +97,7 @@ predicted positive rate: train 13.4% | test 13.4%
 - `python ridge_search.py` selects the ridge regression baseline (λ = 3e-3) on the RMSE
   and saves `figures/ridge_lambda.png`.
 - `python ablations.py` (about 30 minutes) reproduces Tables I and II of the report.
-  For speed, the ablations of Table II fit the label-free preprocessing once on all
-  training rows; this gives the same score as per-fold preprocessing for the
-  reference model.
+  Both tables refit the preprocessing inside each training fold, like `model_search.py`.
 
 ## Required methods
 
