@@ -4,8 +4,8 @@ import numpy as np
 
 
 def sigmoid(t):
-    """Logistic function, written with tanh so that it never overflows."""
-    return 0.5 * (1.0 + np.tanh(0.5 * t))
+    """Logistic function"""
+    return 1 / (1 + np.exp(-t))
 
 
 def logistic_newton(y, tx, lambda_, max_iters=30, tol=1e-6):
