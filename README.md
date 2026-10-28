@@ -12,7 +12,7 @@ described in the report (`HAREHAB1`).
 | | F1 |
 |---|---|
 | 5-fold cross-validation | 0.429 ± 0.005 |
-| AIcrowd test set (submission produced by `run.py`) | 0.4?? (to fill in after submitting) |
+| AIcrowd test set (submission produced by `run.py`) | 0.437 |
 
 The report (2 pages) is in `report/report.pdf`, with its LaTeX source in `report/`.
 
