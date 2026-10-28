@@ -11,9 +11,6 @@ models as mean +/- standard error over folds.
   the same solution as logistic_newton on the selected rows without copying them.
 - Decision thresholds are chosen on the training folds only, never on the
   evaluated fold.
-
-Usage:
-    python ablations.py            (about 20 minutes on a laptop CPU)
 """
 
 import os
@@ -33,12 +30,6 @@ DATA_DIR = os.path.join(ROOT, "data")
 
 K_FOLD = 5
 SEED = 1
-SPECS_NO_LEAK = {name: s for name, s in SPECS.items() if name != "HAREHAB1_PRESENT"}
-
-
-# =============================================================================
-# Helpers
-# =============================================================================
 
 
 def standardize(a):
@@ -97,42 +88,35 @@ def report(title, rows, reference=None):
         print(line, flush=True)
 
 
-# =============================================================================
-# Table I: preprocessing fitted on the training folds only
-# =============================================================================
-
-
 def table_main(x, y, names, k_indices):
-    """Constant, ridge, logistic, + age interactions, + HAREHAB1 presence."""
+    """Constant, ridge, logistic, + age interactions."""
     rows = {
         name: []
         for name in (
             "Ridge regression (lambda=3e-3)",
             "Logistic regression (lambda=1e-3)",
             "+ age interactions (lambda=1e-4)",
-            "+ HAREHAB1 presence (lambda=1e-2), final",
         )
     }
     names_rows = list(rows)
     for k, val in enumerate(k_indices):
         tr = np.concatenate([idx for i, idx in enumerate(k_indices) if i != k])
-        for specs, with_leak in ((SPECS_NO_LEAK, False), (SPECS, True)):
+        for specs in SPECS:
             tx_tr, feats, prep = fit_transform(x[tr], names, specs=specs)
             tx_val, _ = transform(x[val], prep)
             fits = []
-            if not with_leak:
-                a_tr, a_val = add_intercept(tx_tr), add_intercept(tx_val)
-                w, _ = ridge_regression(y[tr], a_tr, 3e-3)
-                fits.append((names_rows[0], a_tr @ w, a_val @ w))
-                w = logistic_newton(y[tr], a_tr, 1e-3)
-                fits.append((names_rows[1], sigmoid(a_tr @ w), sigmoid(a_val @ w)))
-                del a_tr, a_val
+            a_tr, a_val = add_intercept(tx_tr), add_intercept(tx_val)
+            w, _ = ridge_regression(y[tr], a_tr, 3e-3)
+            fits.append((names_rows[0], a_tr @ w, a_val @ w))
+            w = logistic_newton(y[tr], a_tr, 1e-3)
+            fits.append((names_rows[1], sigmoid(a_tr @ w), sigmoid(a_val @ w)))
+            del a_tr, a_val
             tx_tr, _, stats = fit_transform_interactions(tx_tr, feats)
             tx_val = transform_interactions(tx_val, feats, stats)
             tx_tr, tx_val = add_intercept(tx_tr), add_intercept(tx_val)
-            lambda_ = 1e-2 if with_leak else 1e-4
+            lambda_ = 1e-4
             w = logistic_newton(y[tr], tx_tr, lambda_)
-            row = names_rows[3] if with_leak else names_rows[2]
+            row = names_rows[2]
             fits.append((row, sigmoid(tx_tr @ w), sigmoid(tx_val @ w)))
             for row, s_tr, s_val in fits:
                 t = best_threshold(y[tr], s_tr)
@@ -143,11 +127,6 @@ def table_main(x, y, names, k_indices):
         "TABLE I (preprocessing fitted per fold)",
         {n: np.array(v) for n, v in rows.items()},
     )
-
-
-# =============================================================================
-# Table II: ablations, preprocessing fitted once on all training rows
-# =============================================================================
 
 
 def design(
@@ -185,12 +164,11 @@ def table_ablations(x, y, names, k_indices):
     """Missing-value handling and leak (vs. logistic + age, no leak, lambda=1e-4),
     then extra features (vs. the final model, lambda=1e-2)."""
     configs = {
-        "reference: logistic + age, no leak": dict(specs=SPECS_NO_LEAK),
-        "no missing-value indicator": dict(specs=SPECS_NO_LEAK, min_missing=2.0),
+        "reference: logistic + age, no leak": dict(specs=SPECS),
+        "no missing-value indicator": dict(specs=SPECS, min_missing=2.0),
         "all indicators, drop variables >65% missing": dict(
-            specs=SPECS_NO_LEAK, max_missing=0.65, min_missing=1e-9
+            specs=SPECS, max_missing=0.65, min_missing=1e-9
         ),
-        "HAREHAB1 presence indicator": dict(specs=SPECS),
     }
     rows = {}
     for name, kw in configs.items():
