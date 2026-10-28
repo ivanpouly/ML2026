@@ -22,7 +22,7 @@ from utils import load_data
 ROOT = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(ROOT, "data")
 
-LAMBDAS = [1e-2, 1e-3, 1e-4]
+LAMBDAS = [1e-2, 1e-3, 1e-4, 1e-5]
 K_FOLD = 5
 SEED = 1
 
