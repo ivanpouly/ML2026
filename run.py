@@ -13,8 +13,8 @@ ROOT = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(ROOT, "data")
 SUBMISSION_PATH = os.path.join(ROOT, "submission.csv")
 
-LAMBDA = 1e-2  # chosen by 5-fold cross-validation (model_search.py)
-THRESHOLD = 0.1962  # F1-optimal threshold on out-of-fold predictions (model_search.py)
+LAMBDA = 1e-4  # chosen by 5-fold cross-validation (model_search.py)
+THRESHOLD = 0.2046  # F1-optimal threshold on out-of-fold predictions (model_search.py)
 
 x_train, x_test, y_train, train_ids, test_ids = load_data(DATA_DIR)
 y = (y_train + 1) / 2  # {-1, 1} -> {0, 1}
