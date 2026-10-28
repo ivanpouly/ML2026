@@ -4,13 +4,12 @@ All experiments use the same 5 folds (seed 1) and report the F1 score of the
 positive class: mean +/- std over folds, and paired differences between two
 models as mean +/- standard error over folds.
 
-- Table I (main results): preprocessing fitted on the training folds only.
+- Table I (main results): ridge, logistic regression, + age interactions.
 - Table II (ablations): each change is compared with the final model, fold by
-  fold. For speed, the preprocessing (which never uses the labels) is fitted
-  once on all training rows. Logistic regressions are then
-  fitted on the training rows of each fold through a 0/1 row mask, which gives
-  the same solution as logistic_newton on the selected rows without copying them.
-- Decision thresholds are chosen on the training folds only, never on the
+  fold.
+- In both tables, every preprocessing statistic (medians, levels, means,
+  standard deviations, selected columns) is fitted on the training folds only,
+  and the decision threshold is chosen on the training folds, never on the
   evaluated fold.
 
 Usage:
@@ -44,48 +43,18 @@ LAMBDA = 1e-4  # model_search.py, final model (same value as run.py)
 # =============================================================================
 
 
-def standardize(a):
-    """Standardize the columns of a (constant columns are left at 0)."""
-    std = a.std(axis=0)
+def standardize(a_tr, a_val):
+    """Standardize columns with the training statistics (constant columns -> 0)."""
+    mean, std = a_tr.mean(axis=0), a_tr.std(axis=0)
     std[std == 0] = 1.0
-    return (a - a.mean(axis=0)) / std
+    return (a_tr - mean) / std, (a_val - mean) / std
 
 
-def newton_masked(tx, y, mask, lambda_, max_iters=30, tol=1e-6, chunk=40000):
-    """logistic_newton fitted on the rows where mask == 1, without copying them.
-
-    The Hessian is accumulated by chunks of rows to keep memory low.
-    """
-    n_tr, d = mask.sum(), tx.shape[1]
-    w = np.zeros(d)
-    penalty = np.full(d, lambda_)
-    penalty[0] = 0.0
-    for _ in range(max_iters):
-        p = sigmoid(tx @ w)
-        grad = tx.T @ (mask * (p - y)) / n_tr + penalty * w
-        s = mask * p * (1 - p) / n_tr
-        hess = np.diag(penalty)
-        for i in range(0, len(y), chunk):
-            a = tx[i : i + chunk]
-            hess += (a.T * s[i : i + chunk]) @ a
-        step = np.linalg.solve(hess, grad)
-        w -= step
-        if np.max(np.abs(step)) < tol:
-            break
-    return w
-
-
-def cv_logistic_masked(tx, y, k_indices, lambda_):
-    """F1 per fold of a logistic regression on a fixed design matrix."""
-    scores = []
-    for val in k_indices:
-        mask = np.ones(len(y))
-        mask[val] = 0.0
-        p = sigmoid(tx @ newton_masked(tx, y, mask, lambda_))
-        train = mask == 1
-        t = best_threshold(y[train], p[train])
-        scores.append(f1_score(y[val], p[val] >= t))
-    return np.array(scores)
+def fold_f1(y_tr, y_val, tx_tr, tx_val, lambda_):
+    """Validation F1 of a logistic regression, threshold chosen on the training rows."""
+    w = logistic_newton(y_tr, tx_tr, lambda_)
+    t = best_threshold(y_tr, sigmoid(tx_tr @ w))
+    return f1_score(y_val, sigmoid(tx_val @ w) >= t)
 
 
 def report(title, rows, reference=None):
@@ -106,7 +75,10 @@ def report(title, rows, reference=None):
 
 
 def table_main(x, y, names, k_indices):
-    """Constant, ridge, logistic, + age interactions (final model)."""
+    """Ridge, logistic, + age interactions (final model).
+
+    Returns the per-fold F1 of the final model, the reference of Table II.
+    """
     rows = {
         name: []
         for name in (
@@ -137,73 +109,100 @@ def table_main(x, y, names, k_indices):
             rows[row].append(f1_score(y[val], s_val >= t))
         del tx_tr, tx_val
         print(f"  Table I: fold {k + 1}/{K_FOLD} done", flush=True)
-    report(
-        "TABLE I (preprocessing fitted per fold)",
-        {n: np.array(v) for n, v in rows.items()},
-    )
+    rows = {n: np.array(v) for n, v in rows.items()}
+    report("TABLE I", rows)
+    return rows[final]
 
 
 # =============================================================================
-# Table II: ablations, preprocessing fitted once on all training rows
+# Table II: one change at a time, compared with the final model
 # =============================================================================
 
 
-def design(
-    x, names, specs=SPECS, max_missing=0.95, min_missing=0.005, extra=None, sex=False
+def design_fold(
+    x_tr,
+    x_val,
+    names,
+    specs=SPECS,
+    max_missing=0.95,
+    min_missing=0.005,
+    extra=None,
+    sex=False,
 ):
-    """Preprocess, append optional extra columns, add age (and sex) interactions."""
-    tx, feats, _ = fit_transform(
-        x, names, specs=specs, max_missing=max_missing, min_missing=min_missing
+    """Training and validation design matrices of one fold, with the intercept.
+
+    Every statistic is fitted on x_tr. `extra` is an optional function
+    (x_tr, x_val, names) -> (columns_tr, columns_val) of additional raw columns,
+    appended before the age interactions.
+    """
+    tx_tr, feats, prep = fit_transform(
+        x_tr, names, specs=specs, max_missing=max_missing, min_missing=min_missing
     )
+    tx_val, _ = transform(x_val, prep)
     if extra is not None:
-        tx = np.hstack([tx, standardize(extra)])
-        feats = feats + [f"extra_{j}" for j in range(extra.shape[1])]
-    n_base = tx.shape[1]
-    tx, feats, _ = fit_transform_interactions(tx, feats)
-    blocks = [np.ones((len(tx), 1)), tx]
+        e_tr, e_val = standardize(*extra(x_tr, x_val, names))
+        tx_tr, tx_val = np.hstack([tx_tr, e_tr]), np.hstack([tx_val, e_val])
+        feats = feats + [f"extra_{j}" for j in range(e_tr.shape[1])]
+    n_base = tx_tr.shape[1]
+    tx_tr, _, stats = fit_transform_interactions(tx_tr, feats)
+    tx_val = transform_interactions(tx_val, feats, stats)
     if sex:
-        s = next(i for i, f in enumerate(feats[:n_base]) if f.startswith("SEX="))
+        s = next(i for i, f in enumerate(feats) if f.startswith("SEX="))
         others = [j for j in range(n_base) if j != s]
-        blocks.append(standardize(tx[:, [s]] * tx[:, others]))
-    return np.hstack(blocks)
+        p_tr, p_val = standardize(
+            tx_tr[:, [s]] * tx_tr[:, others], tx_val[:, [s]] * tx_val[:, others]
+        )
+        tx_tr, tx_val = np.hstack([tx_tr, p_tr]), np.hstack([tx_val, p_val])
+        del p_tr, p_val
+    return add_intercept(tx_tr), add_intercept(tx_val)
 
 
-def module_presence(x, names):
-    """Presence indicators of the optional-module questions (HAREHAB1 excluded),
-    identical columns merged, columns answered by fewer than 100 rows dropped."""
+def module_presence(x_tr, x_val, names):
+    """Presence indicators of the optional-module questions (HAREHAB1 excluded).
+
+    On the training rows: identical columns are merged and columns answered by
+    fewer than 100 rows are dropped; the same columns are kept for x_val.
+    """
     start, end = names.index("PDIABTST"), names.index("ADANXEV")
-    cols = [c for c in names[start : end + 1] if c != "HAREHAB1"]
-    present = ~np.isnan(x[:, [names.index(c) for c in cols]])
-    _, first = np.unique(present.T, axis=0, return_index=True)
-    keep = [j for j in sorted(first) if 100 <= present[:, j].sum() < len(x)]
-    return present[:, keep].astype(float)
+    idx = [names.index(c) for c in names[start : end + 1] if c != "HAREHAB1"]
+    present_tr, present_val = ~np.isnan(x_tr[:, idx]), ~np.isnan(x_val[:, idx])
+    _, first = np.unique(present_tr.T, axis=0, return_index=True)
+    keep = [j for j in sorted(first) if 100 <= present_tr[:, j].sum() < len(x_tr)]
+    print(f"    {len(keep)} module-presence indicators", flush=True)
+    return present_tr[:, keep].astype(float), present_val[:, keep].astype(float)
 
 
-def harehab1_presence(x, names):
+def harehab1_presence(x_tr, x_val, names):
     """Whether HAREHAB1 was answered. It is only asked after a heart attack, so it
     reveals the label (target leak): measured here, excluded from the final model."""
-    return (~np.isnan(x[:, [names.index("HAREHAB1")]])).astype(float)
+    j = names.index("HAREHAB1")
+    return (~np.isnan(x_tr[:, [j]])).astype(float), (~np.isnan(x_val[:, [j]])).astype(
+        float
+    )
 
 
-def table_ablations(x, y, names, k_indices):
+def table_ablations(x, y, names, k_indices, reference):
     """Effect of each change, compared fold by fold with the final model."""
     genhlth_onehot = {**SPECS, "GENHLTH": _cat(na=(7, 9))}
     configs = {
-        "reference: final model": dict(),
         "no missing-value indicator": dict(min_missing=2.0),
         "all indicators, drop variables >65% missing": dict(
             max_missing=0.65, min_missing=1e-9
         ),
         "GENHLTH one-hot instead of ordinal": dict(specs=genhlth_onehot),
-        "+ module-presence indicators": dict(extra=module_presence(x, names)),
+        "+ module-presence indicators": dict(extra=module_presence),
         "+ sex x feature interactions": dict(sex=True),
-        "+ HAREHAB1 presence (target leak, excluded)": dict(
-            extra=harehab1_presence(x, names)
-        ),
+        "+ HAREHAB1 presence (target leak, excluded)": dict(extra=harehab1_presence),
     }
-    rows = {}
+    rows = {"reference: final model": reference}
     for name, kw in configs.items():
-        rows[name] = cv_logistic_masked(design(x, names, **kw), y, k_indices, LAMBDA)
+        scores = []
+        for k, val in enumerate(k_indices):
+            tr = np.concatenate([idx for i, idx in enumerate(k_indices) if i != k])
+            tx_tr, tx_val = design_fold(x[tr], x[val], names, **kw)
+            scores.append(fold_f1(y[tr], y[val], tx_tr, tx_val, LAMBDA))
+            del tx_tr, tx_val
+        rows[name] = np.array(scores)
         print(f"  Table II: {name} done", flush=True)
     report(f"TABLE II (lambda={LAMBDA:.0e})", rows, "reference: final model")
 
@@ -214,8 +213,8 @@ def main():
     names = load_column_names(os.path.join(DATA_DIR, "x_train.csv"))
     k_indices = build_k_indices(len(y), K_FOLD, SEED)
     print(f"Constant 'healthy' classifier: accuracy {1 - y.mean():.4f}, F1 0")
-    table_main(x, y, names, k_indices)
-    table_ablations(x, y, names, k_indices)
+    reference = table_main(x, y, names, k_indices)
+    table_ablations(x, y, names, k_indices, reference)
 
 
 if __name__ == "__main__":
