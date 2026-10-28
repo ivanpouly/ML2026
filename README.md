@@ -4,23 +4,21 @@ Team: Antonin Hocquet, David Attias, Ivan Pouly
 
 We predict whether a respondent of the 2015 Behavioral Risk Factor Surveillance
 System (BRFSS) reports coronary heart disease or a heart attack, from 321 survey
-answers. The final model is an **L2-regularized logistic regression trained with
-Newton's method** on cleaned and encoded features plus their interactions with age,
-with a decision threshold tuned for the F1 score. It does not use the target leak
-described in the report (`HAREHAB1`).
+answers. The final model is an L2-regularized logistic regression trained with
+Newton's method on cleaned and encoded features plus their interactions with age,
+with a decision threshold tuned for the F1 score.
 
 | | F1 |
 |---|---|
 | 5-fold cross-validation | 0.429 ± 0.005 |
-| AIcrowd test set (submission produced by `run.py`) | 0.437 |
+| AIcrowd test set | 0.437 |
 
 The report (2 pages) is in `report/report.pdf`, with its LaTeX source in `report/`.
 
 ## Setup
 
 - Python 3 with NumPy only (the course `project1-grading` conda environment works).
-  `ridge_search.py` also uses matplotlib, only to draw a figure.
-- Put `x_train.csv`, `y_train.csv` and `x_test.csv` in `data/` (not tracked by git).
+- Put `x_train.csv`, `y_train.csv` and `x_test.csv` in `data/`.
   The first run caches them in `data/cache.npz` (about 1 GB), which makes later runs
   much faster.
 
@@ -30,7 +28,7 @@ The report (2 pages) is in `report/report.pdf`, with its LaTeX source in `report
 python run.py
 ```
 
-It writes `submission.csv` in a few minutes (about 3.5 GB of memory). Expected output:
+It writes `submission.csv` in a few minutes. Expected output:
 
 ```
 tx_train: (328135, 488) | tx_test: (109379, 488)
@@ -52,27 +50,25 @@ predicted positive rate: train 13.4% | test 13.4%
 | `model.py` | L2-regularized logistic regression solved with Newton's method. |
 | `cross_validation.py` | Fold split, metrics (F1, RMSE), F1-optimal threshold, per-fold preprocessing. |
 | `model_search.py` | Selects λ and the decision threshold by 5-fold cross-validation. |
-| `ridge_search.py` | Ridge regression baseline: λ selection by cross-validation, RMSE figure. |
+| `ridge_search.py` | Ridge regression baseline: λ selection by cross-validation and RMSE loss. |
 | `ablations.py` | Reproduces every number of Tables I and II of the report. |
 | `report/` | Report source (`report.tex`, `literature.bib`, figure) and PDF. |
 
 ## Pipeline
 
 1. **Variable selection** (`specifications.py`). From the CDC codebook we keep 73 raw
-   variables and build 2 derived ones (75 in total). We drop record identifiers and
+   variables and build 2 derived ones. We drop record identifiers and
    interview logistics, phone-screening questions, survey weights, raw answers
    duplicated by a cleaner CDC calculated variable, and the 109 optional-module
-   questions (asked only in some states).
+   questions. We drop `HAREHAB1` which is
+   only asked to respondents who had a heart attack, so whether it was answered reveals
+   the label for 773 training respondents.
 2. **Recoding** (`preprocess.py`, rules in `SPECS`). "Don't know" / "refused" codes
-   (7/9, 77/99, …) become missing; "none" (88) becomes 0; values outside the documented
-   range (e.g. sentinels 900 or 99900) become missing; heavy-tailed quantities get
+   (7/9, 77/99, …) become missing, "none" (88) becomes 0, values outside the documented
+   range become missing, heavy-tailed quantities get mapped via
    `log(1 + x)`.
 3. **Derived variables**. `IS_PARTIAL` (interview stopped early) and `HH_ADULTS` (number
    of adults, merging the landline and cell-phone questions).
-   **Excluded target leak:** `HAREHAB1` (cardiac rehabilitation after a heart attack) is
-   only asked to respondents who had a heart attack, so whether it was answered reveals
-   the label for 773 training respondents. It carries no clinical information, so the
-   final model does not use it; `ablations.py` measures what it would add (Table II).
 4. **Encoding**, with statistics fitted on the training data only. Numeric variables:
    median imputation. Categorical variables: one-hot encoding without the most frequent
    level. Missing-value indicator when at least 0.5% of the values are missing.
@@ -90,12 +86,11 @@ predicted positive rate: train 13.4% | test 13.4%
 
 - 5 folds, one fixed random split (seed 1), shared by all experiments, so that two
   models can be compared fold by fold (paired differences).
-- The preprocessing is refitted inside each training fold; the decision threshold is
+- The preprocessing is refitted inside each training fold. The decision threshold is
   always chosen on training data, never on the evaluated fold.
 - `python model_search.py` (about 15 minutes) compares λ ∈ {1e-2, 1e-3, 1e-4, 1e-5}, with and
   without age interactions, and prints the `LAMBDA` and `THRESHOLD` used in `run.py`.
-- `python ridge_search.py` selects the ridge regression baseline (λ = 3e-3) on the RMSE
-  and saves `figures/ridge_lambda.png`.
+- `python ridge_search.py` selects the ridge regression baseline (λ = 3e-3) on the RMSE.
 - `python ablations.py` (about 30 minutes) reproduces Tables I and II of the report.
   Both tables refit the preprocessing inside each training fold, like `model_search.py`.
 
@@ -104,5 +99,5 @@ predicted positive rate: train 13.4% | test 13.4%
 `implementations.py` contains `mean_squared_error_gd`, `mean_squared_error_sgd`
 (mini-batch size 1), `least_squares`, `ridge_regression`, `logistic_regression` and
 `reg_logistic_regression`. Each returns `(w, loss)`, the last weight vector and its
-loss; the loss of the regularized methods does not include the penalty term. They pass
+loss. The loss of the regularized methods does not include the penalty term. They pass
 the course's public grading tests.
