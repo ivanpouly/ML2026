@@ -8,10 +8,6 @@ def sigmoid(t):
 
 def logistic_newton(y, tx, lambda_, max_iters=30, tol=1e-6):
     """Minimize  mean log-loss + lambda_ / 2 * ||w[1:]||^2  with Newton's method.
-
-    The intercept w[0] is not penalized. Each step solves H step = gradient,
-    so it converges in a handful of iterations without a learning rate.
-
     Args:
         y: shape=(N,). Labels in {0, 1}.
         tx: shape=(N, D). Features, first column = intercept (ones).
