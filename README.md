@@ -1,6 +1,6 @@
 # CS-433 Project 1 – Predicting coronary heart disease (MICHD) from BRFSS survey data
 
-Team: Author One, Author Two, Author Three
+Team: Antonin Hocquet, David Attias, Ivan Pouly
 
 We predict whether a respondent of the 2015 Behavioral Risk Factor Surveillance
 System (BRFSS) reports coronary heart disease or a heart attack, from 321 survey
