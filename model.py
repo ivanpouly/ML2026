@@ -1,5 +1,3 @@
-"""L2-regularized logistic regression trained with Newton's method (numpy only)."""
-
 import numpy as np
 
 
