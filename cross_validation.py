@@ -71,11 +71,7 @@ def f1_score(y, y_pred):
 
 
 def best_threshold(y, scores, n_grid=99):
-    """Decision threshold on `scores` that maximizes the F1 score on (y, scores).
-
-    Call it on TRAINING data only, then apply the threshold to validation data.
-    The candidates are quantiles of the scores, so the grid adapts to their scale.
-    """
+    """Decision threshold on `scores` that maximizes the F1 score on (y, scores). """
     candidates = np.quantile(scores, np.linspace(0.01, 0.99, n_grid))
     f1s = [f1_score(y, scores >= t) for t in candidates]
     return candidates[int(np.argmax(f1s))]
@@ -83,10 +79,6 @@ def best_threshold(y, scores, n_grid=99):
 
 def evaluate(tx_tr, y_tr, tx_val, y_val, w):
     """RMSE and F1 score of a linear model on the training and validation folds.
-
-    The F1 threshold is chosen on the training fold, then reused on the
-    validation fold, so the validation F1 is not optimistically biased.
-
     Returns:
         dict with keys rmse_train, rmse_val, f1_train, f1_val, threshold.
     """

@@ -1,9 +1,4 @@
-"""Age interactions: products of age with every other feature (numpy only).
-
-Risk factors do not weigh the same at 30 and at 70. A linear model cannot
-express that on its own; the products age x feature let each feature's
-weight change with age.
-"""
+"""Add age interactions: products of age with every other feature."""
 
 import numpy as np
 

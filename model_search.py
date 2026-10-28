@@ -4,9 +4,6 @@ Compares L2 logistic regression with and without age interactions, for each
 lambda, on the validation F1 score (threshold fitted on the training folds).
 For the best configuration, picks the threshold that maximizes F1 on all
 out-of-fold predictions. Copy the printed LAMBDA and THRESHOLD into run.py.
-
-Usage:
-    python model_search.py
 """
 
 import os
