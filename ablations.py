@@ -5,15 +5,16 @@ positive class: mean +/- std over folds, and paired differences between two
 models as mean +/- standard error over folds.
 
 - Table I (main results): preprocessing fitted on the training folds only.
-- Table II (ablations): for speed, the preprocessing (which never uses the
-  labels) is fitted once on all training rows. Logistic regressions are then
+- Table II (ablations): each change is compared with the final model, fold by
+  fold. For speed, the preprocessing (which never uses the labels) is fitted
+  once on all training rows. Logistic regressions are then
   fitted on the training rows of each fold through a 0/1 row mask, which gives
   the same solution as logistic_newton on the selected rows without copying them.
 - Decision thresholds are chosen on the training folds only, never on the
   evaluated fold.
 
 Usage:
-    python ablations.py            (about 20 minutes on a laptop CPU)
+    python ablations.py            (about 30 minutes on a laptop CPU)
 """
 
 import os
@@ -33,7 +34,9 @@ DATA_DIR = os.path.join(ROOT, "data")
 
 K_FOLD = 5
 SEED = 1
-SPECS_NO_LEAK = {name: s for name, s in SPECS.items() if name != "HAREHAB1_PRESENT"}
+LAMBDA_RIDGE = 3e-3  # ridge_search.py
+LAMBDA_NO_AGE = 1e-3  # model_search.py, logistic regression without age interactions
+LAMBDA = 1e-4  # model_search.py, final model (same value as run.py)
 
 
 # =============================================================================
@@ -103,41 +106,36 @@ def report(title, rows, reference=None):
 
 
 def table_main(x, y, names, k_indices):
-    """Constant, ridge, logistic, + age interactions, + HAREHAB1 presence."""
+    """Constant, ridge, logistic, + age interactions (final model)."""
     rows = {
         name: []
         for name in (
-            "Ridge regression (lambda=3e-3)",
-            "Logistic regression (lambda=1e-3)",
-            "+ age interactions (lambda=1e-4)",
-            "+ HAREHAB1 presence (lambda=1e-2), final",
+            f"Ridge regression (lambda={LAMBDA_RIDGE:.0e})",
+            f"Logistic regression (lambda={LAMBDA_NO_AGE:.0e})",
+            f"+ age interactions (lambda={LAMBDA:.0e}), final",
         )
     }
-    names_rows = list(rows)
+    ridge, logistic, final = list(rows)
     for k, val in enumerate(k_indices):
         tr = np.concatenate([idx for i, idx in enumerate(k_indices) if i != k])
-        for specs, with_leak in ((SPECS_NO_LEAK, False), (SPECS, True)):
-            tx_tr, feats, prep = fit_transform(x[tr], names, specs=specs)
-            tx_val, _ = transform(x[val], prep)
-            fits = []
-            if not with_leak:
-                a_tr, a_val = add_intercept(tx_tr), add_intercept(tx_val)
-                w, _ = ridge_regression(y[tr], a_tr, 3e-3)
-                fits.append((names_rows[0], a_tr @ w, a_val @ w))
-                w = logistic_newton(y[tr], a_tr, 1e-3)
-                fits.append((names_rows[1], sigmoid(a_tr @ w), sigmoid(a_val @ w)))
-                del a_tr, a_val
-            tx_tr, _, stats = fit_transform_interactions(tx_tr, feats)
-            tx_val = transform_interactions(tx_val, feats, stats)
-            tx_tr, tx_val = add_intercept(tx_tr), add_intercept(tx_val)
-            lambda_ = 1e-2 if with_leak else 1e-4
-            w = logistic_newton(y[tr], tx_tr, lambda_)
-            row = names_rows[3] if with_leak else names_rows[2]
-            fits.append((row, sigmoid(tx_tr @ w), sigmoid(tx_val @ w)))
-            for row, s_tr, s_val in fits:
-                t = best_threshold(y[tr], s_tr)
-                rows[row].append(f1_score(y[val], s_val >= t))
-            del tx_tr, tx_val
+        tx_tr, feats, prep = fit_transform(x[tr], names)
+        tx_val, _ = transform(x[val], prep)
+        fits = []
+        a_tr, a_val = add_intercept(tx_tr), add_intercept(tx_val)
+        w, _ = ridge_regression(y[tr], a_tr, LAMBDA_RIDGE)
+        fits.append((ridge, a_tr @ w, a_val @ w))
+        w = logistic_newton(y[tr], a_tr, LAMBDA_NO_AGE)
+        fits.append((logistic, sigmoid(a_tr @ w), sigmoid(a_val @ w)))
+        del a_tr, a_val
+        tx_tr, _, stats = fit_transform_interactions(tx_tr, feats)
+        tx_val = transform_interactions(tx_val, feats, stats)
+        tx_tr, tx_val = add_intercept(tx_tr), add_intercept(tx_val)
+        w = logistic_newton(y[tr], tx_tr, LAMBDA)
+        fits.append((final, sigmoid(tx_tr @ w), sigmoid(tx_val @ w)))
+        for row, s_tr, s_val in fits:
+            t = best_threshold(y[tr], s_tr)
+            rows[row].append(f1_score(y[val], s_val >= t))
+        del tx_tr, tx_val
         print(f"  Table I: fold {k + 1}/{K_FOLD} done", flush=True)
     report(
         "TABLE I (preprocessing fitted per fold)",
@@ -181,35 +179,33 @@ def module_presence(x, names):
     return present[:, keep].astype(float)
 
 
-def table_ablations(x, y, names, k_indices):
-    """Missing-value handling and leak (vs. logistic + age, no leak, lambda=1e-4),
-    then extra features (vs. the final model, lambda=1e-2)."""
-    configs = {
-        "reference: logistic + age, no leak": dict(specs=SPECS_NO_LEAK),
-        "no missing-value indicator": dict(specs=SPECS_NO_LEAK, min_missing=2.0),
-        "all indicators, drop variables >65% missing": dict(
-            specs=SPECS_NO_LEAK, max_missing=0.65, min_missing=1e-9
-        ),
-        "HAREHAB1 presence indicator": dict(specs=SPECS),
-    }
-    rows = {}
-    for name, kw in configs.items():
-        rows[name] = cv_logistic_masked(design(x, names, **kw), y, k_indices, 1e-4)
-        print(f"  Table II: {name} done", flush=True)
-    report("TABLE II, part 1 (lambda=1e-4)", rows, "reference: logistic + age, no leak")
+def harehab1_presence(x, names):
+    """Whether HAREHAB1 was answered. It is only asked after a heart attack, so it
+    reveals the label (target leak): measured here, excluded from the final model."""
+    return (~np.isnan(x[:, [names.index("HAREHAB1")]])).astype(float)
 
+
+def table_ablations(x, y, names, k_indices):
+    """Effect of each change, compared fold by fold with the final model."""
     genhlth_onehot = {**SPECS, "GENHLTH": _cat(na=(7, 9))}
     configs = {
         "reference: final model": dict(),
+        "no missing-value indicator": dict(min_missing=2.0),
+        "all indicators, drop variables >65% missing": dict(
+            max_missing=0.65, min_missing=1e-9
+        ),
         "GENHLTH one-hot instead of ordinal": dict(specs=genhlth_onehot),
         "+ module-presence indicators": dict(extra=module_presence(x, names)),
         "+ sex x feature interactions": dict(sex=True),
+        "+ HAREHAB1 presence (target leak, excluded)": dict(
+            extra=harehab1_presence(x, names)
+        ),
     }
     rows = {}
     for name, kw in configs.items():
-        rows[name] = cv_logistic_masked(design(x, names, **kw), y, k_indices, 1e-2)
+        rows[name] = cv_logistic_masked(design(x, names, **kw), y, k_indices, LAMBDA)
         print(f"  Table II: {name} done", flush=True)
-    report("TABLE II, part 2 (lambda=1e-2)", rows, "reference: final model")
+    report(f"TABLE II (lambda={LAMBDA:.0e})", rows, "reference: final model")
 
 
 def main():
